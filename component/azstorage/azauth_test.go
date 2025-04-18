@@ -704,14 +704,14 @@ func (suite *authTestSuite) TestBlockAzCLI() {
 	assert.NotNil(stg)
 
 	err := stg.SetupPipeline()
-	assert.Nil(err)
+	assert.NoError(err)
 
 	err = stg.TestPipeline()
 	if storageTestConfigurationParameters.SkipAzCLI {
 		// error is returned when azcli is not installed or logged out
-		assert.NotNil(err)
+		assert.Error(err)
 	} else {
-		assert.Nil(err)
+		assert.NoError(err)
 	}
 }
 
@@ -732,14 +732,14 @@ func (suite *authTestSuite) TestAdlsAzCLI() {
 	assert.NotNil(stg)
 
 	err := stg.SetupPipeline()
-	assert.Nil(err)
+	assert.NoError(err)
 
 	err = stg.TestPipeline()
 	if storageTestConfigurationParameters.SkipAzCLI {
 		// error is returned when azcli is not installed or logged out
-		assert.NotNil(err)
+		assert.Error(err)
 	} else {
-		assert.Nil(err)
+		assert.NoError(err)
 	}
 }
 

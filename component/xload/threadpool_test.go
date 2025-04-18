@@ -60,7 +60,7 @@ func (suite *threadPoolTestSuite) TestThreadPoolCreate() {
 		return 0, nil
 	})
 	suite.assert.NotNil(tp)
-	suite.assert.Equal(tp.worker, uint32(1))
+	suite.assert.Equal(uint32(1), tp.worker)
 }
 
 func (suite *threadPoolTestSuite) TestThreadPoolStartStop() {
@@ -72,7 +72,7 @@ func (suite *threadPoolTestSuite) TestThreadPoolStartStop() {
 
 	tp := NewThreadPool(2, r)
 	suite.assert.NotNil(tp)
-	suite.assert.Equal(tp.worker, uint32(2))
+	suite.assert.Equal(uint32(2), tp.worker)
 
 	tp.Start()
 	suite.assert.NotNil(tp.priorityItems)
@@ -90,7 +90,7 @@ func (suite *threadPoolTestSuite) TestThreadPoolSchedule() {
 
 	tp := NewThreadPool(2, r)
 	suite.assert.NotNil(tp)
-	suite.assert.Equal(tp.worker, uint32(2))
+	suite.assert.Equal(uint32(2), tp.worker)
 
 	tp.Start()
 	suite.assert.NotNil(tp.priorityItems)
@@ -114,7 +114,7 @@ func (suite *threadPoolTestSuite) TestPrioritySchedule() {
 
 	tp := NewThreadPool(10, r)
 	suite.assert.NotNil(tp)
-	suite.assert.Equal(tp.worker, uint32(10))
+	suite.assert.Equal(uint32(10), tp.worker)
 
 	tp.Start()
 	suite.assert.NotNil(tp.priorityItems)
@@ -130,7 +130,7 @@ func (suite *threadPoolTestSuite) TestPrioritySchedule() {
 	}
 
 	time.Sleep(1 * time.Second)
-	suite.assert.Equal(callbackCnt, int32(100))
+	suite.assert.Equal(int32(100), callbackCnt)
 	tp.Stop()
 }
 
