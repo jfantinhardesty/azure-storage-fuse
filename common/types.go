@@ -65,6 +65,7 @@ const (
 
 	MbToBytes     = 1024 * 1024
 	GbToBytes     = 1024 * MbToBytes
+	TbToBytes     = 1024 * GbToBytes
 	BfuseStats    = "blobfuse_stats"
 	BlockIDLength = 16
 
@@ -169,6 +170,20 @@ type Block struct {
 	Flags      BitMap16
 	Id         string
 	Data       []byte
+}
+
+// Statfs type used by component in replace of syscall.Statfs_t
+// as defined by cgofuse https://pkg.go.dev/github.com/winfsp/cgofuse/fuse#Statfs_t
+type Statfs_t struct {
+	Bsize   int64
+	Blocks  uint64
+	Bfree   uint64
+	Bavail  uint64
+	Files   uint64
+	Ffree   uint64
+	Frsize  int64
+	Flags   int64
+	Namemax uint64
 }
 
 // Dirty : Handle is dirty or not

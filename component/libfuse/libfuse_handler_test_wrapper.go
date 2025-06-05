@@ -1,5 +1,5 @@
-//go:build !fuse2
-// +build !fuse2
+//go:build !fuse2 && unix
+// +build !fuse2,unix
 
 /*
     _____           _____   _____   ____          ______  _____  ------
@@ -632,7 +632,7 @@ func testStatFs(suite *libfuseTestSuite) {
 	defer suite.cleanupTest()
 	path := C.CString("/")
 	defer C.free(unsafe.Pointer(path))
-	suite.mock.EXPECT().StatFs().Return(&syscall.Statfs_t{Frsize: 1,
+	suite.mock.EXPECT().StatFs().Return(&common.Statfs_t{Frsize: 1,
 		Blocks: 2, Bavail: 3, Bfree: 4}, true, nil)
 	buf := &C.statvfs_t{}
 	libfuse_statfs(path, buf)

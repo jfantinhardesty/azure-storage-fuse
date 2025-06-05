@@ -1,5 +1,5 @@
-//go:build !fuse2
-// +build !fuse2
+//go:build !fuse2 && unix
+// +build !fuse2,unix
 
 /*
     _____           _____   _____   ____          ______  _____  ------
