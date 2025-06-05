@@ -1,4 +1,4 @@
-//go:build unix
+//go:build linux
 
 /*
     _____           _____   _____   ____          ______  _____  ------
@@ -33,25 +33,16 @@
    SOFTWARE
 */
 
-package common
+package cmd
 
-import "syscall"
-
-func Statfs(path string) (*Statfs_t, error) {
-	var stat syscall.Statfs_t
-	err := syscall.Statfs(path, &stat)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Statfs_t{
-		Blocks: stat.Blocks,
-		Bfree:  stat.Bfree,
-		Bavail: stat.Bavail,
-		Bsize:  stat.Bsize,
-		Frsize: stat.Frsize,
-		Files:  stat.Files,
-		Ffree:  stat.Ffree,
-		Flags:  stat.Flags,
-	}, nil
-}
+import (
+	_ "github.com/Azure/azure-storage-fuse/v2/component/attr_cache"
+	_ "github.com/Azure/azure-storage-fuse/v2/component/azstorage"
+	_ "github.com/Azure/azure-storage-fuse/v2/component/block_cache"
+	_ "github.com/Azure/azure-storage-fuse/v2/component/custom"
+	_ "github.com/Azure/azure-storage-fuse/v2/component/entry_cache"
+	_ "github.com/Azure/azure-storage-fuse/v2/component/file_cache"
+	_ "github.com/Azure/azure-storage-fuse/v2/component/libfuse"
+	_ "github.com/Azure/azure-storage-fuse/v2/component/loopback"
+	_ "github.com/Azure/azure-storage-fuse/v2/component/xload"
+)

@@ -51,7 +51,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 
 	"gopkg.in/ini.v1"
 )
@@ -346,22 +345,6 @@ func ExpandPath(path string) string {
 	return path
 }
 
-// NotifyMountToParent : Send a signal to parent process about successful mount
-func NotifyMountToParent() error {
-	if !ForegroundMount {
-		ppid := syscall.Getppid()
-		if ppid > 1 {
-			if err := syscall.Kill(ppid, syscall.SIGUSR2); err != nil {
-				return err
-			}
-		} else {
-			return fmt.Errorf("failed to get parent pid, received : %v", ppid)
-		}
-	}
-
-	return nil
-}
-
 var duPath []string = []string{"/usr/bin/du", "/usr/local/bin/du", "/usr/sbin/du", "/usr/local/sbin/du", "/sbin/du", "/bin/du"}
 var selectedDuPath string = ""
 
@@ -428,8 +411,7 @@ var currentUID int = -1
 // GetDiskUsageFromStatfs: Current disk usage of temp path
 func GetDiskUsageFromStatfs(path string) (float64, float64, error) {
 	// We need to compute the disk usage percentage for the temp path
-	var stat syscall.Statfs_t
-	err := syscall.Statfs(path, &stat)
+	stat, err := Statfs(path)
 	if err != nil {
 		return 0, 0, err
 	}

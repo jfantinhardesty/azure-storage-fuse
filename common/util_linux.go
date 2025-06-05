@@ -1,3 +1,5 @@
+//go:build linux
+
 /*
     _____           _____   _____   ____          ______  _____  ------
    |     |  |      |     | |     | |     |     | |       |            |
@@ -31,16 +33,44 @@
    SOFTWARE
 */
 
-package cmd
+package common
 
 import (
-	_ "github.com/Azure/azure-storage-fuse/v2/component/attr_cache"
-	_ "github.com/Azure/azure-storage-fuse/v2/component/azstorage"
-	_ "github.com/Azure/azure-storage-fuse/v2/component/block_cache"
-	_ "github.com/Azure/azure-storage-fuse/v2/component/custom"
-	_ "github.com/Azure/azure-storage-fuse/v2/component/entry_cache"
-	_ "github.com/Azure/azure-storage-fuse/v2/component/file_cache"
-	_ "github.com/Azure/azure-storage-fuse/v2/component/libfuse"
-	_ "github.com/Azure/azure-storage-fuse/v2/component/loopback"
-	_ "github.com/Azure/azure-storage-fuse/v2/component/xload"
+	"fmt"
+	"syscall"
 )
+
+func Statfs(path string) (*Statfs_t, error) {
+	var stat syscall.Statfs_t
+	err := syscall.Statfs(path, &stat)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Statfs_t{
+		Blocks: stat.Blocks,
+		Bfree:  stat.Bfree,
+		Bavail: stat.Bavail,
+		Bsize:  stat.Bsize,
+		Frsize: stat.Frsize,
+		Files:  stat.Files,
+		Ffree:  stat.Ffree,
+		Flags:  stat.Flags,
+	}, nil
+}
+
+// NotifyMountToParent : Send a signal to parent process about successful mount
+func NotifyMountToParent() error {
+	if !ForegroundMount {
+		ppid := syscall.Getppid()
+		if ppid > 1 {
+			if err := syscall.Kill(ppid, syscall.SIGUSR2); err != nil {
+				return err
+			}
+		} else {
+			return fmt.Errorf("failed to get parent pid, received : %v", ppid)
+		}
+	}
+
+	return nil
+}
