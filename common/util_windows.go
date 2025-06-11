@@ -54,7 +54,6 @@ func Statfs(path string) (*Statfs_t, error) {
 		return nil, err
 	}
 
-
 	return &Statfs_t{
 		Blocks: total / blockSize,
 		Bfree:  free / blockSize,
@@ -65,4 +64,9 @@ func Statfs(path string) (*Statfs_t, error) {
 		Ffree:  1e9,
 		Flags:  0,
 	}, nil
+}
+
+// NotifyMountToParent : Does nothing on Windows
+func NotifyMountToParent() error {
+	return nil
 }
