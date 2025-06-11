@@ -41,14 +41,12 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"runtime/pprof"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/Azure/azure-storage-fuse/v2/common"
@@ -105,37 +103,47 @@ func (opt *mountOptions) validate(skipNonEmptyMount bool) error {
 		return fmt.Errorf("mount path not provided")
 	}
 
-	if _, err := os.Stat(opt.MountPath); os.IsNotExist(err) {
-		return fmt.Errorf("mount directory does not exist")
-	} else if common.IsDirectoryMounted(opt.MountPath) {
-		// Try to cleanup the stale mount
-		log.Info("Mount::validate : Mount directory is already mounted, trying to cleanup")
-		active, err := common.IsMountActive(opt.MountPath)
-		if active || err != nil {
-			// Previous mount is still active so we need to fail this mount
-			return fmt.Errorf("directory is already mounted")
-		} else {
-			// Previous mount is in stale state so lets cleanup the state
-			log.Info("Mount::validate : Cleaning up stale mount")
-			if err = unmountBlobfuse2(opt.MountPath, true); err != nil {
-				return fmt.Errorf("directory is already mounted, unmount manually before remount [%v]", err.Error())
-			}
+	// Windows requires that the mount directory does not exist while
+	// linux requires that the directory does exist. So we skip these
+	// checks if
+	if runtime.GOOS == "windows" {
+		_, err := os.Stat(opt.MountPath)
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("mount directory already exists")
+		}
+	} else {
+		if _, err := os.Stat(opt.MountPath); os.IsNotExist(err) {
+			return fmt.Errorf("mount directory does not exist")
+		} else if common.IsDirectoryMounted(opt.MountPath) {
+			// Try to cleanup the stale mount
+			log.Info("Mount::validate : Mount directory is already mounted, trying to cleanup")
+			active, err := common.IsMountActive(opt.MountPath)
+			if active || err != nil {
+				// Previous mount is still active so we need to fail this mount
+				return fmt.Errorf("directory is already mounted")
+			} else {
+				// Previous mount is in stale state so lets cleanup the state
+				log.Info("Mount::validate : Cleaning up stale mount")
+				if err = unmountBlobfuse2(opt.MountPath, true); err != nil {
+					return fmt.Errorf("directory is already mounted, unmount manually before remount [%v]", err.Error())
+				}
 
-			// Clean up the file-cache temp directory if any
-			var tempCachePath string
-			_ = config.UnmarshalKey("file_cache.path", &tempCachePath)
+				// Clean up the file-cache temp directory if any
+				var tempCachePath string
+				_ = config.UnmarshalKey("file_cache.path", &tempCachePath)
 
-			var cleanupOnStart bool
-			_ = config.UnmarshalKey("file_cache.cleanup-on-start", &cleanupOnStart)
+				var cleanupOnStart bool
+				_ = config.UnmarshalKey("file_cache.cleanup-on-start", &cleanupOnStart)
 
-			if tempCachePath != "" && cleanupOnStart {
-				if err = common.TempCacheCleanup(tempCachePath); err != nil {
-					return fmt.Errorf("failed to cleanup file cache [%s]", err.Error())
+				if tempCachePath != "" && cleanupOnStart {
+					if err = common.TempCacheCleanup(tempCachePath); err != nil {
+						return fmt.Errorf("failed to cleanup file cache [%s]", err.Error())
+					}
 				}
 			}
+		} else if !skipNonEmptyMount && !common.IsDirectoryEmpty(opt.MountPath) {
+			return fmt.Errorf("mount directory is not empty")
 		}
-	} else if !skipNonEmptyMount && !common.IsDirectoryEmpty(opt.MountPath) {
-		return fmt.Errorf("mount directory is not empty")
 	}
 
 	if err := common.ELogLevel.Parse(opt.Logging.LogLevel); err != nil {
@@ -476,94 +484,33 @@ var mountCmd = &cobra.Command{
 
 		common.ForegroundMount = options.Foreground
 
-		pipeline, err = internal.NewPipeline(options.Components, !daemon.WasReborn())
+		// If on Linux start with the go daemon
+		// If on Windows, don't use the daemon since it is not supported
+		if runtime.GOOS == "windows" {
+			pipeline, err = internal.NewPipeline(options.Components, true)
+		} else {
+			pipeline, err = internal.NewPipeline(options.Components, !daemon.WasReborn())
+		}
 		if err != nil {
 			log.Err("mount : failed to initialize new pipeline [%v]", err)
 			return Destroy(fmt.Sprintf("failed to initialize new pipeline [%s]", err.Error()))
 		}
 
 		log.Info("mount: Mounting blobfuse2 on %s", options.MountPath)
-		if !options.Foreground {
+		if !options.Foreground && runtime.GOOS != "windows" {
 			pidFile := strings.Replace(options.MountPath, "/", "_", -1) + ".pid"
 			pidFileName := filepath.Join(os.ExpandEnv(common.DefaultWorkDir), pidFile)
 
 			pid := os.Getpid()
 			fname := fmt.Sprintf("/tmp/blobfuse2.%v", pid)
 
-			dmnCtx := &daemon.Context{
-				PidFileName: pidFileName,
-				PidFilePerm: 0644,
-				Umask:       022,
-				LogFileName: fname, // this will redirect stderr of child to given file
-			}
-
 			ctx, _ := context.WithCancel(context.Background()) //nolint
 
-			// Signal handlers for parent and child to communicate success or failures in mount
-			var sigusr2 chan os.Signal
-			if !daemon.WasReborn() { // execute in parent only
-				sigusr2 = make(chan os.Signal, 1)
-				signal.Notify(sigusr2, syscall.SIGUSR2)
-
-			} else { // execute in child only
-				daemon.SetSigHandler(sigusrHandler(pipeline, ctx), syscall.SIGUSR1, syscall.SIGUSR2)
-				go func() {
-					_ = daemon.ServeSignals()
-				}()
-			}
-
-		retry:
-			// If the .pid file is locked and there no blobfuse process owning it then we need to try
-			// a cleanup of the .pid file. If cleanup goes through then retry the daemonization.
-			child, err := dmnCtx.Reborn()
+			err = createDaemon(pipeline, ctx, pidFileName, fname)
 			if err != nil {
-				log.Err("mount : failed to daemonize application [%s], trying auto cleanup", err.Error())
-				rmErr := os.Remove(pidFileName)
-				if rmErr != nil {
-					log.Err("mount : auto cleanup failed [%v]", rmErr.Error())
-					return Destroy(fmt.Sprintf("failed to daemonize application [%s]", err.Error()))
-				}
-				goto retry
+				return fmt.Errorf("mount: failed to create daemon [%v]", err.Error())
 			}
 
-			log.Debug("mount: foreground disabled, child = %v", daemon.WasReborn())
-			if child == nil { // execute in child only
-				defer dmnCtx.Release() // nolint
-				setGOConfig()
-				go startDynamicProfiler()
-
-				// In case of failure stderr will have the error emitted by child and parent will read
-				// those logs from the file set in daemon context
-				return runPipeline(pipeline, ctx)
-			} else { // execute in parent only
-				defer os.Remove(fname)
-
-				childDone := make(chan struct{})
-
-				go monitorChild(child.Pid, childDone)
-
-				select {
-				case <-sigusr2:
-					log.Info("mount: Child [%v] mounted successfully at %s", child.Pid, options.MountPath)
-
-				case <-childDone:
-					// Get error string from the child, stderr or child was redirected to a file
-					log.Info("mount: Child [%v] terminated from %s", child.Pid, options.MountPath)
-
-					buff, err := os.ReadFile(dmnCtx.LogFileName)
-					if err != nil {
-						log.Err("mount: failed to read child [%v] failure logs [%s]", child.Pid, err.Error())
-						return Destroy(fmt.Sprintf("failed to mount, please check logs [%s]", err.Error()))
-					} else {
-						return Destroy(string(buff))
-					}
-
-				case <-time.After(options.WaitForMount):
-					log.Info("mount: Child [%v : %s] status check timeout", child.Pid, options.MountPath)
-				}
-
-				_ = log.Destroy()
-			}
 		} else {
 			if options.CPUProfile != "" {
 				os.Remove(options.CPUProfile)
@@ -605,29 +552,6 @@ var mountCmd = &cobra.Command{
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return nil, cobra.ShellCompDirectiveDefault
 	},
-}
-
-func monitorChild(pid int, done chan struct{}) {
-	// Monitor the child process and if child terminates then exit
-	var wstatus syscall.WaitStatus
-
-	for {
-		// Wait for a signal from child
-		wpid, err := syscall.Wait4(pid, &wstatus, 0, nil)
-		if err != nil {
-			log.Err("Error retrieving child status [%s]", err.Error())
-			break
-		}
-
-		if wpid == pid {
-			// Exit only if child has exited
-			// Signal can be received on a state change of child as well
-			if wstatus.Exited() || wstatus.Signaled() || wstatus.Stopped() {
-				close(done)
-				return
-			}
-		}
-	}
 }
 
 func ignoreFuseOptions(opt string) bool {
@@ -676,20 +600,6 @@ func startMonitor(pid int) {
 			common.EnableMonitoring = false
 			log.Err("Mount::startMonitor : [%s]", err.Error())
 		}
-	}
-}
-
-func sigusrHandler(pipeline *internal.Pipeline, ctx context.Context) daemon.SignalHandlerFunc {
-	return func(sig os.Signal) error {
-		log.Crit("Mount::sigusrHandler : Signal %d received", sig)
-
-		var err error
-		if sig == syscall.SIGUSR1 {
-			log.Crit("Mount::sigusrHandler : SIGUSR1 received")
-			config.OnConfigChange()
-		}
-
-		return err
 	}
 }
 
